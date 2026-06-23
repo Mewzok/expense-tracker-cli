@@ -9,6 +9,7 @@ def parse_arguments():
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     add_parser = subparsers.add_parser("add", help="Add an expense to the database")
+    list_parser = subparsers.add_parser("list", help="List all recorded expenses in database")
 
     # required arguments
     add_parser.add_argument("amount", type=float, help="The amount spent(e.g., 12.50)")
@@ -19,10 +20,15 @@ def parse_arguments():
 
     # optional flag arguments
     add_parser.add_argument("-d", "--date", type=str, default=None, help="Date in YYYY-MM-DD format (optional)")
+    list_parser.add_argument("--category", type=str, default=None, help="Filter by category")
+    list_parser.add_argument("--month", type=str, default=None, help="Filter by month")
 
     return parser.parse_args()
 
 def handle_add(args, con, cur):
+
+    print(f"Adding expense: ${args.amount} for {args.category} ({args.reason})")
+
     if args.date:
         # if user entered date
         cur.execute("""
@@ -39,12 +45,45 @@ def handle_add(args, con, cur):
     con.commit()
     print("Expense recorded successfully.")
 
+def handle_list(args, con, cur):
+
+    print("Current Expenses in Database:")
+
+    # dynamically build query to handle arguments
+
+    query = "SELECT date, category, amount, reason FROM expenses WHERE 1=1"
+    params = []
+
+    if args.category:
+        query += " AND category = ?"
+        params.append(args.category)
+
+    if args.month:
+        query += " AND date LIKE ?"
+        params.append(f"%{args.month}%")
+
+    query += " ORDER BY date DESC, category ASC"
+
+    cur.execute(query, params)
+    rows = cur.fetchall()
+
+    con.close()
+
+    print(f"{'Date':<19} | {'Category':<15} | {'Amount':<11} | {'Reason':<25}")
+    print("-" * 75)
+
+    for row in rows:
+        date, category, amount, raw_reason = row
+
+        # check for reason
+        reason = raw_reason or ""
+
+        print(f"{date:<19} | {category:<15} | ${amount:<10.2f} | {reason:<25}")
+
 
 def main():
     con = None
     args = parse_arguments()
-
-    print(f"Adding expense: ${args.amount} for {args.category} ({args.reason})")
 
     try:
         # create and/or connect to expenses database
@@ -62,14 +101,10 @@ def main():
                     )               
         """)
 
-        handle_add(args, con, cur)
-
-        print("Current Expenses in Database:")
-        for row in cur.execute("SELECT amount, category, reason, date FROM expenses ORDER BY date"):
-            amount, category, reason, date = row
-            display_reason = reason if reason is not None else ""
-            print(f"{date} | {category} | ${amount:<7.2f} | {display_reason}")
-
+        if args.command == "add":
+            handle_add(args, con, cur)
+        elif args.command == "list":
+            handle_list(args, con, cur)
         con.close()
 
     except sqlite3.OperationalError as e:
