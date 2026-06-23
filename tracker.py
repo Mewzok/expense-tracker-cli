@@ -50,8 +50,7 @@ def handle_list(args, con, cur):
     print("Current Expenses in Database:")
 
     # dynamically build query to handle arguments
-
-    query = "SELECT date, category, amount, reason FROM expenses WHERE 1=1"
+    query = "SELECT id, date, category, amount, reason FROM expenses WHERE 1=1"
     params = []
 
     if args.category:
@@ -69,16 +68,16 @@ def handle_list(args, con, cur):
 
     con.close()
 
-    print(f"{'Date':<19} | {'Category':<15} | {'Amount':<11} | {'Reason':<25}")
-    print("-" * 75)
+    print(f"{'ID':>5} | {'Date':<19} | {'Category':<15} | {'Amount':<11} | {'Reason':<25}")
+    print("-" * 85)
 
     for row in rows:
-        date, category, amount, raw_reason = row
+        id, date, category, amount, raw_reason = row
 
         # check for reason
         reason = raw_reason or ""
 
-        print(f"{date:<19} | {category:<15} | ${amount:<10.2f} | {reason:<25}")
+        print(f"{id:>5} | {date:<19} | {category:<15} | ${amount:<10.2f} | {reason:<25}")
 
 
 def main():
