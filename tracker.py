@@ -1,158 +1,203 @@
-import sqlite3
 import argparse
+import sqlite3
+from datetime import datetime
+
+DB_PATH = "expenses.db"
+
+
+def positive_amount(value):
+    amount = float(value)
+    if amount <= 0:
+        raise argparse.ArgumentTypeError("Amount must be greater than 0.")
+    return amount
+
+
+def non_empty_string(value):
+    text = value.strip()
+    if not text:
+        raise argparse.ArgumentTypeError("Value must not be empty.")
+    return text
+
+
+def valid_date(value):
+    try:
+        datetime.strptime(value, "%Y-%m-%d")
+        return value
+    except ValueError:
+        raise argparse.ArgumentTypeError("Date must use YYYY-MM-DD format.")
+
+
+def valid_month(value):
+    try:
+        datetime.strptime(value, "%Y-%m")
+        return value
+    except ValueError:
+        raise argparse.ArgumentTypeError("Month must use YYYY-MM format.")
+
 
 def parse_arguments():
     parser = argparse.ArgumentParser(
-        description="Track expenses by utilizing a local database."
+        description="Track expenses using a local SQLite database."
     )
 
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     add_parser = subparsers.add_parser("add", help="Add an expense to the database")
-    list_parser = subparsers.add_parser("list", help="List all recorded expenses in database")
-    delete_parser = subparsers.add_parser("delete", help="Delete an expense from the database")
-    summary_parser = subparsers.add_parser("summary", help="Displays total spent overall and a breakdown by category")
+    list_parser = subparsers.add_parser("list", help="List recorded expenses")
+    delete_parser = subparsers.add_parser("delete", help="Delete an expense by ID")
+    summary_parser = subparsers.add_parser(
+        "summary", help="Display total spending and category breakdown"
+    )
 
-    # required arguments
-    add_parser.add_argument("amount", type=float, help="The amount spent (e.g., 12.50)")
-    add_parser.add_argument("category", type=str, help="The category (e.g., food)")
-    delete_parser.add_argument("id", type=int, help="The ID of the desired row (e.g., 7)")
+    add_parser.add_argument("amount", type=positive_amount, help="The amount spent (e.g., 12.50)")
+    add_parser.add_argument("category", type=non_empty_string, help="The category (e.g., food)")
+    add_parser.add_argument(
+        "reason",
+        type=str,
+        nargs="?",
+        default=None,
+        help="Optional description for the expense (e.g., lunch)",
+    )
+    add_parser.add_argument(
+        "-d",
+        "--date",
+        type=valid_date,
+        default=None,
+        help="Optional date in YYYY-MM-DD format",
+    )
 
-    # optional arguments
-    add_parser.add_argument("reason", type=str, nargs="?", default=None, help="The description/reason (e.g., lunch) (optional)")
+    list_parser.add_argument("--category", type=non_empty_string, default=None, help="Filter by category")
+    list_parser.add_argument("--month", type=valid_month, default=None, help="Filter by month in YYYY-MM format")
 
-    # optional flag arguments
-    add_parser.add_argument("-d", "--date", type=str, default=None, help="Date in YYYY-MM-DD format (optional)")
-    list_parser.add_argument("--category", type=str, default=None, help="Filter by category")
-    list_parser.add_argument("--month", type=str, default=None, help="Filter by month (e.g. 2026-06)")
-    summary_parser.add_argument("--month", type=str, default=None, help="Filter by month (e.g. 2026-06)")
+    summary_parser.add_argument("--month", type=valid_month, default=None, help="Filter by month in YYYY-MM format")
+
+    delete_parser.add_argument("id", type=int, help="The ID of the row to delete (e.g., 7)")
 
     return parser.parse_args()
 
-def handle_add(args, con, cur):
+def format_reason(reason):
+    return reason.strip() if reason and reason.strip() else ""
 
-    print(f"Adding expense: ${args.amount} for {args.category} ({args.reason})")
+
+def handle_add(args, conn, cursor):
+    reason = format_reason(args.reason)
+
+    if reason:
+        print(f"Adding expense: ${args.amount:.2f} for {args.category} ({reason})")
+    else:
+        print(f"Adding expense: ${args.amount:.2f} for {args.category}")
 
     if args.date:
-        # if user entered date
-        cur.execute("""
-            INSERT INTO expenses (amount, category, reason, date)
-            VALUES (?, ?, ?, ?)
-        """, (args.amount, args.category, args.reason, args.date))
+        cursor.execute(
+            "INSERT INTO expenses (amount, category, reason, date) VALUES (?, ?, ?, ?)",
+            (args.amount, args.category, reason or None, args.date),
+        )
     else:
-        # if no date provided
-        cur.execute("""
-            INSERT INTO expenses (amount, category, reason)
-            VALUES (?, ?, ?)
-        """, (args.amount, args.category, args.reason))
+        cursor.execute(
+            "INSERT INTO expenses (amount, category, reason) VALUES (?, ?, ?)",
+            (args.amount, args.category, reason or None),
+        )
 
-    con.commit()
+    conn.commit()
     print("Expense recorded successfully.")
 
-def handle_list(args, cur):
-
-    print("Current Expenses in Database:")
-
-    # dynamically build query to handle arguments
-    query = "SELECT id, date, category, amount, reason FROM expenses WHERE 1=1"
+def handle_list(args, cursor):
+    filters = ["1=1"]
     params = []
 
     if args.category:
-        query += " AND category = ?"
+        filters.append("category = ?")
         params.append(args.category)
 
     if args.month:
-        query += " AND date LIKE ?"
-        params.append(f"%{args.month}%")
+        filters.append("date LIKE ?")
+        params.append(f"{args.month}%")
 
-    query += " ORDER BY date DESC, category ASC"
+    query = (
+        "SELECT id, date, category, amount, reason FROM expenses "
+        "WHERE " + " AND ".join(filters) + " ORDER BY date DESC, category ASC"
+    )
 
-    cur.execute(query, params)
-    rows = cur.fetchall()
+    cursor.execute(query, params)
+    rows = cursor.fetchall()
 
-    print(f"{'ID':>5} | {'Date':<19} | {'Category':<15} | {'Amount':<11} | {'Reason':<25}")
-    print("-" * 85)
+    print(f"{'ID':>5} | {'Date':<10} | {'Category':<15} | {'Amount':<11} | {'Reason':<25}")
+    print("-" * 72)
 
     for row in rows:
-        id, date, category, amount, raw_reason = row
-
-        # check for reason
+        row_id, date_value, category, amount, raw_reason = row
         reason = raw_reason or ""
+        print(f"{row_id:>5} | {date_value:<10} | {category:<15} | ${amount:<10.2f} | {reason:<25}")
 
-        print(f"{id:>5} | {date:<19} | {category:<15} | ${amount:<10.2f} | {reason:<25}")
+def handle_delete(args, conn, cursor):
+    cursor.execute("DELETE FROM expenses WHERE id = ?", (args.id,))
+    if cursor.rowcount == 0:
+        print(f"No expense found with ID {args.id}.")
+    else:
+        conn.commit()
+        print(f"Deleted expense with ID {args.id}.")
 
-def handle_delete(args, con, cur):
-
-    print(f"Deleting row {args.id}")
-    cur.execute("DELETE FROM expenses WHERE id = ?", (args.id,))
-    con.commit()
-    con.close()
-
-def handle_summary(args, con, cur):
-    month_arg = ""
+def handle_summary(args, cursor):
+    filters = ["1=1"]
     params = []
 
-    # add month query if applicable
     if args.month:
-        month_arg = " AND date LIKE ?"
-        params.append(f"%{args.month}%")
+        filters.append("date LIKE ?")
+        params.append(f"{args.month}%")
 
-    # get overall total
-    total_query = f"SELECT SUM(amount) FROM expenses WHERE 1=1{month_arg}"
-    cur.execute(total_query, params)
-    total_row = cur.fetchone()
-    overall_total = total_row[0] if total_row[0] is not None else 0
-    
-    # get breakdown by category
-    breakdown_query = f"SELECT category, SUM(amount) FROM expenses WHERE 1=1{month_arg} GROUP BY category"
-    cur.execute(breakdown_query, params)
-    breakdown = cur.fetchall()
+    filter_clause = " AND ".join(filters)
 
-    # print all
-    month_str = f" for {args.month}" if args.month else ""
+    cursor.execute(f"SELECT SUM(amount) FROM expenses WHERE {filter_clause}", params)
+    overall_total = cursor.fetchone()[0] or 0
 
-    print(f"Total expenses{month_str}: ${overall_total:.2f}")
-    print(f"--- Breakdown by Category{month_str} ---")
-    for category, cat_total in breakdown:
-        print(f"{category.title()}: ${cat_total:.2f}")
+    cursor.execute(
+        f"SELECT category, SUM(amount) FROM expenses WHERE {filter_clause} GROUP BY category",
+        params,
+    )
+    breakdown = cursor.fetchall()
+
+    month_text = f" for {args.month}" if args.month else ""
+    print(f"Total expenses{month_text}: ${overall_total:.2f}")
+    print(f"--- Breakdown by category{month_text} ---")
+
+    for category, total in breakdown:
+        print(f"{category.title()}: ${total:.2f}")
 
 def main():
-    con = None
     args = parse_arguments()
 
     try:
-        # create and/or connect to expenses database
-        con = sqlite3.connect("expenses.db")
-        cur = con.cursor()
+        with sqlite3.connect(DB_PATH) as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS expenses (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    amount REAL NOT NULL,
+                    category TEXT NOT NULL,
+                    reason TEXT,
+                    date TEXT NOT NULL DEFAULT (DATE('now', 'localtime'))
+                )
+                """
+            )
 
-        # create table if doesn't exist yet
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS expenses (
-                       id INTEGER PRIMARY KEY AUTOINCREMENT,
-                       amount REAL NOT NULL,
-                       category TEXT NOT NULL,
-                       reason TEXT,
-                       date TEXT NOT NULL DEFAULT (DATETIME('now', 'localtime'))
-                    )               
-        """)
+            if args.command == "add":
+                handle_add(args, conn, cursor)
+            elif args.command == "list":
+                handle_list(args, cursor)
+            elif args.command == "delete":
+                handle_delete(args, conn, cursor)
+            elif args.command == "summary":
+                handle_summary(args, cursor)
 
-        if args.command == "add":
-            handle_add(args, con, cur)
-        elif args.command == "list":
-            handle_list(args, cur)
-        elif args.command == "delete":
-            handle_delete(args, con, cur)
-        elif args.command == "summary":
-            handle_summary(args, con, cur)
-        con.close()
+        conn.close()
 
-    except sqlite3.OperationalError as e:
-        print(f"Operational error (e.g., disk full, permissions): {e}")
-    except sqlite3.Error as e:
-        print(f"General SQLite error: {e}")
-    finally:
-        if con is not None:
-            con.close()
+    except sqlite3.OperationalError as exc:
+        print(f"SQLite operational error: {exc}")
+    except sqlite3.Error as exc:
+        print(f"SQLite error: {exc}")
+    except Exception as exc:
+        print(f"Unexpected error: {exc}")
 
 if __name__ == "__main__":
     main()
