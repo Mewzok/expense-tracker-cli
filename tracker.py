@@ -6,7 +6,10 @@ DB_PATH = "expenses.db"
 
 
 def positive_amount(value):
-    amount = float(value)
+    try:
+        amount = float(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError("Amount must be a number.")
     if amount <= 0:
         raise argparse.ArgumentTypeError("Amount must be greater than 0.")
     return amount
@@ -87,16 +90,10 @@ def handle_add(args, conn, cursor):
     else:
         print(f"Adding expense: ${args.amount:.2f} for {args.category}")
 
-    if args.date:
-        cursor.execute(
-            "INSERT INTO expenses (amount, category, reason, date) VALUES (?, ?, ?, ?)",
-            (args.amount, args.category, reason or None, args.date),
-        )
-    else:
-        cursor.execute(
-            "INSERT INTO expenses (amount, category, reason) VALUES (?, ?, ?)",
-            (args.amount, args.category, reason or None),
-        )
+    cursor.execute(
+        "INSERT INTO expenses (amount, category, reason, date) VALUES (?, ?, ?, ?)",
+        (args.amount, args.category, reason or None, args.date),
+    )
 
     conn.commit()
     print("Expense recorded successfully.")
@@ -121,6 +118,10 @@ def handle_list(args, cursor):
     cursor.execute(query, params)
     rows = cursor.fetchall()
 
+    if not rows:
+        print("No expenses found.")
+        return
+    
     print(f"{'ID':>5} | {'Date':<10} | {'Category':<15} | {'Amount':<11} | {'Reason':<25}")
     print("-" * 72)
 
@@ -189,8 +190,6 @@ def main():
                 handle_delete(args, conn, cursor)
             elif args.command == "summary":
                 handle_summary(args, cursor)
-
-        conn.close()
 
     except sqlite3.OperationalError as exc:
         print(f"SQLite operational error: {exc}")
