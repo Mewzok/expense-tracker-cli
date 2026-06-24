@@ -10,10 +10,13 @@ def parse_arguments():
 
     add_parser = subparsers.add_parser("add", help="Add an expense to the database")
     list_parser = subparsers.add_parser("list", help="List all recorded expenses in database")
+    delete_parser = subparsers.add_parser("delete", help="Delete an expense from the database")
+    summary_parser = subparsers.add_parser("summary", help="Displays total spent overall and a breakdown by category")
 
     # required arguments
-    add_parser.add_argument("amount", type=float, help="The amount spent(e.g., 12.50)")
+    add_parser.add_argument("amount", type=float, help="The amount spent (e.g., 12.50)")
     add_parser.add_argument("category", type=str, help="The category (e.g., food)")
+    delete_parser.add_argument("id", type=int, help="The ID of the desired row (e.g., 7)")
 
     # optional arguments
     add_parser.add_argument("reason", type=str, nargs="?", default=None, help="The description/reason (e.g., lunch) (optional)")
@@ -21,7 +24,8 @@ def parse_arguments():
     # optional flag arguments
     add_parser.add_argument("-d", "--date", type=str, default=None, help="Date in YYYY-MM-DD format (optional)")
     list_parser.add_argument("--category", type=str, default=None, help="Filter by category")
-    list_parser.add_argument("--month", type=str, default=None, help="Filter by month")
+    list_parser.add_argument("--month", type=str, default=None, help="Filter by month (e.g. 2026-06)")
+    summary_parser.add_argument("--month", type=str, default=None, help="Filter by month (e.g. 2026-06)")
 
     return parser.parse_args()
 
@@ -45,7 +49,7 @@ def handle_add(args, con, cur):
     con.commit()
     print("Expense recorded successfully.")
 
-def handle_list(args, con, cur):
+def handle_list(args, cur):
 
     print("Current Expenses in Database:")
 
@@ -66,8 +70,6 @@ def handle_list(args, con, cur):
     cur.execute(query, params)
     rows = cur.fetchall()
 
-    con.close()
-
     print(f"{'ID':>5} | {'Date':<19} | {'Category':<15} | {'Amount':<11} | {'Reason':<25}")
     print("-" * 85)
 
@@ -79,6 +81,40 @@ def handle_list(args, con, cur):
 
         print(f"{id:>5} | {date:<19} | {category:<15} | ${amount:<10.2f} | {reason:<25}")
 
+def handle_delete(args, con, cur):
+
+    print(f"Deleting row {args.id}")
+    cur.execute("DELETE FROM expenses WHERE id = ?", (args.id,))
+    con.commit()
+    con.close()
+
+def handle_summary(args, con, cur):
+    month_arg = ""
+    params = []
+
+    # add month query if applicable
+    if args.month:
+        month_arg = " AND date LIKE ?"
+        params.append(f"%{args.month}%")
+
+    # get overall total
+    total_query = f"SELECT SUM(amount) FROM expenses WHERE 1=1{month_arg}"
+    cur.execute(total_query, params)
+    total_row = cur.fetchone()
+    overall_total = total_row[0] if total_row[0] is not None else 0
+    
+    # get breakdown by category
+    breakdown_query = f"SELECT category, SUM(amount) FROM expenses WHERE 1=1{month_arg} GROUP BY category"
+    cur.execute(breakdown_query, params)
+    breakdown = cur.fetchall()
+
+    # print all
+    month_str = f" for {args.month}" if args.month else ""
+
+    print(f"Total expenses{month_str}: ${overall_total:.2f}")
+    print(f"--- Breakdown by Category{month_str} ---")
+    for category, cat_total in breakdown:
+        print(f"{category.title()}: ${cat_total:.2f}")
 
 def main():
     con = None
@@ -103,7 +139,11 @@ def main():
         if args.command == "add":
             handle_add(args, con, cur)
         elif args.command == "list":
-            handle_list(args, con, cur)
+            handle_list(args, cur)
+        elif args.command == "delete":
+            handle_delete(args, con, cur)
+        elif args.command == "summary":
+            handle_summary(args, con, cur)
         con.close()
 
     except sqlite3.OperationalError as e:
